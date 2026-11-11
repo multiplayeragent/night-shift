@@ -1,0 +1,684 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Night Shift</title>
+<style>
+  :root { --ink: #f1ecdf; --dim: #a9a3b8; --amber: #ffbf3f; --red: #ff4d5e; --green: #5be38a; --panel: #15131dcc; }
+  html, body { margin: 0; height: 100%; overflow: hidden; overscroll-behavior: none; background: #07060b; }
+  body { font: 15px/1.35 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: var(--ink); user-select: none; -webkit-user-select: none; }
+  canvas { display: block; width: 100vw; height: 100vh; height: 100dvh; touch-action: none; }
+  .hud { position: fixed; pointer-events: none; text-shadow: 0 2px 4px #000c; }
+  #top { top: max(10px, env(safe-area-inset-top)); left: 12px; right: 12px; display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; font-weight: 800; }
+  #clock { font-size: 22px; } #clock small { display: block; font-size: 12px; color: var(--dim); font-weight: 700; }
+  #power { text-align: right; font-size: 18px; } #power small { display: block; font-size: 12px; color: var(--dim); font-weight: 700; }
+  #power.low { color: var(--red); }
+  #status { top: calc(max(10px, env(safe-area-inset-top)) + 46px); left: 0; right: 0; text-align: center; font-size: 13px; font-weight: 700; color: var(--dim); }
+  #status b { color: var(--ink); } #status .bad { color: var(--red); } #status .ok { color: var(--green); }
+  #radio { top: calc(max(10px, env(safe-area-inset-top)) + 68px); left: 16px; right: 16px; text-align: center; font-size: 15px; font-weight: 700; color: var(--amber); min-height: 20px; }
+  #msg { left: 16px; right: 16px; bottom: calc(max(10px, env(safe-area-inset-bottom)) + 150px); text-align: center; font-size: 15px; font-weight: 700; }
+  #net { bottom: max(4px, env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%); font-size: 12px; font-weight: 600; opacity: .7; white-space: nowrap; }
+  #controls { position: fixed; left: 0; right: 0; bottom: calc(max(10px, env(safe-area-inset-bottom)) + 18px); display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 0 12px; }
+  #actions, #tabs { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; max-width: 560px; width: 100%; }
+  #actions button { flex: 1; min-width: 56px; max-width: 160px; min-height: 52px; border-radius: 12px; border: 2px solid #ffffff44; background: var(--panel); color: #fff; font: 800 14px system-ui, sans-serif; touch-action: none; cursor: pointer; }
+  #actions button.on { border-color: var(--amber); background: #ffbf3f44; } #actions button.shut { border-color: var(--red); background: #ff4d5e44; }
+  #actions button.cam { min-width: 52px; font-size: 12px; padding: 0 4px; }
+  #tabs button { flex: 1; min-height: 44px; border-radius: 10px; border: 1px solid #ffffff2a; background: #0c0b12cc; color: var(--dim); font: 700 12px system-ui, sans-serif; cursor: pointer; line-height: 1.15; padding: 2px 4px; }
+  #tabs button b { display: block; color: var(--ink); font-size: 13px; } #tabs button.mine { border-color: var(--amber); color: var(--amber); } #tabs button.mine b { color: var(--amber); }
+  #tabs button.human { opacity: .55; }
+  #over { position: fixed; inset: 0; display: grid; place-items: center; background: #000a; }
+  #over[hidden], #controls[hidden], #top[hidden] { display: none; }
+  .card { width: min(380px, calc(100vw - 32px)); max-height: 86vh; overflow: auto; padding: 20px; border-radius: 16px; background: #17141f; border: 1px solid #ffffff22; box-sizing: border-box; text-align: center; }
+  .card h2 { margin: 0 0 4px; font-size: 26px; } .card h3 { margin: 14px 0 4px; font-size: 14px; color: var(--amber); text-align: left; }
+  .card ol { margin: 0; padding-left: 24px; font-size: 14px; text-align: left; } .card li span { float: right; font-variant-numeric: tabular-nums; }
+  .card p { margin: 6px 0 0; font-size: 14px; opacity: .85; }
+  button.go { margin-top: 16px; width: 100%; min-height: 48px; border: 0; border-radius: 12px; background: var(--amber); color: #2a1a00; font: 800 17px system-ui, sans-serif; cursor: pointer; }
+</style>
+<script src="https://cdn.multiplayeragent.com/sdk/mp.global.js"></script>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div class="hud" id="top"><div id="clock"></div><div id="power"></div></div>
+<div class="hud" id="status"></div>
+<div class="hud" id="radio"></div>
+<div class="hud" id="msg"></div>
+<div id="controls"><div id="actions"></div><div id="tabs"></div></div>
+<div class="hud" id="net">Connecting…</div>
+<div id="over" hidden><div class="card">
+  <h2 id="overTitle"></h2><p id="overLine"></p>
+  <h3>Most nights survived</h3><ol id="board"><li>Loading…</li></ol>
+  <button class="go" id="again">Play again</button>
+  <p id="next"></p>
+</div></div>
+<script>
+/* ═══ NIGHT SHIFT · a Multiplayer Agent starter ═════════════════════════════════════════
+ * Guard the toy shop until 6 AM. Co-op, 1–4 players; each runs a station, bots run the rest.
+ *
+ * WHERE THINGS ARE (search for the "── " headers):
+ *   CONFIG ........ night length, power costs, the music box, how fast each toy gets
+ *   SHOP .......... the camera rooms, the toys and the path each one walks to the office
+ *   CONNECTION .... MP_CONNECT, joining, the offline room, who is host
+ *   STATIONS ...... who runs which station (cameras, left door, right door, music box)
+ *   NIGHT (HOST) .. phases (brief, play, won, lost), the clock, power, the music box,
+ *                   the toys' moves and attacks, and the bots at empty stations. Host only.
+ *   ME ............ my station's controls: door, light, camera, winding. I write only my own.
+ *   DRAW .......... the camera feeds, the doors, the music box, the toys, the jumpscare
+ *   HUD & RESULTS . clock, power, the radio line, buttons, results card, leaderboard
+ *   INPUT & SOUND . keyboard, buttons, WebAudio effects
+ *
+ * HOW THE MULTIPLAYER WORKS (a relay room: no server code):
+ *   - Each player writes its OWN entity: `s` (one packed JSON field: which station I run, since
+ *     when, and its controls: door shut, light on, camera number, winding), `hb` (heartbeat)
+ *     once a second, and `n`/`c` (name, color) once.
+ *   - A station belongs to the human who took it first (ties: lowest sessionId). Bots run the
+ *     stations nobody has.
+ *   - The HOST is the lowest sessionId among live players (heartbeat seen in the last 3s),
+ *     worked out every frame. It reads every station's controls from the owners' `s` (or
+ *     its own bots) and writes the shared fields:
+ *       `night` {id, v, n, phase, timers, power, doors, lights, cam, music box, toys, who got
+ *               in}: ONE JSON field, written on every change; v only goes up
+ *       `bots`  which stations the bots run, with their names
+ *     The host's browser runs the toys, the power and the clock. A new host adopts it all.
+ *   - No intents are needed: every control is a field on your own entity.
+ *   - A new night starts when the host bumps night.id; every client then resets.
+ *   - ?attract plays offline with bots only, showing all four stations at once.
+ *   - Leaderboard "nights-survived": the highest night you made it through.
+ */
+
+// ── CONFIG ──────────────────────────────────────────────────────────────────────────
+const CONFIG = {
+  hourMs: 45000,          // ms per in-game hour; the night runs 12 AM → 6 AM
+  briefMs: 4000,          // ms of "Night N" before the clock starts
+  wonMs: 9000,            // ms the "6 AM" card shows before the next night
+  resultsMs: 14000,       // ms the results show after a toy gets in, before a new run
+  drain: { base: 0.07, door: 0.26, light: 0.16 }, // power % used per second: always, per shut door, per light on
+  outMs: [4000, 11000],   // power out: a toy walks in this long later (unless it's 6 AM first)
+  box: { drain: 1.5, perNight: 0.4, wind: 14, jackMs: 5000 }, // music box: % lost per second (+ per night), % per second while winding, ms of silence before Jack pops
+  moveMs: 5000,           // ms between each toy's chances to move
+  lingerMs: 2500,         // ms a toy waits at a door before it can try to get in
+  levels: { soldier: [5, 3], bunny: [4, 3], ballerina: [0, 4] }, // [night 1 level, + per night], out of 20: chance to move each try
+  botMiss: 0.12,          // chance per night number that a door bot misses a toy's footsteps
+  board: "nights-survived",
+};
+
+// ── SHOP ────────────────────────────────────────────────────────────────────────────
+// The camera rooms. Doors are spots 5 (left) and 6 (right), right outside the office.
+const ROOMS = [
+  { name: "Stockroom", short: "STOCK", wall: "#3a2f45", shelf: "#5b4636" },
+  { name: "Show floor", short: "SHOW", wall: "#2f3d4a", shelf: "#7a3f3f" },
+  { name: "Doll aisle", short: "DOLLS", wall: "#4a2f40", shelf: "#3f5a7a" },
+  { name: "Left hall", short: "L-HALL", wall: "#2a2a33", shelf: "#3a3a44" },
+  { name: "Right hall", short: "R-HALL", wall: "#2a2a33", shelf: "#3a3a44" },
+];
+const LEFT_DOOR = 5, RIGHT_DOOR = 6;
+// The toys and their routes (lists of next spots from each spot). Jack lives in the music box.
+const TOYS = [
+  { kind: "soldier", name: "the Tin Soldier", next: { 0: [1], 1: [3], 3: [LEFT_DOOR] } },
+  { kind: "bunny", name: "the Rag Bunny", next: { 0: [2], 2: [4], 4: [RIGHT_DOOR] } },
+  { kind: "ballerina", name: "the Ballerina", next: { 0: [1, 2], 1: [3], 2: [4], 3: [LEFT_DOOR], 4: [RIGHT_DOOR] }, shy: true }, // freezes while a camera watches her
+];
+const STATIONS = [
+  { key: "cams", label: "📷 Cameras" },
+  { key: "left", label: "⬅ Left door" },
+  { key: "right", label: "Right door ➡" },
+  { key: "music", label: "🎵 Music box" },
+];
+const BOT_NAMES = ["Kit", "Moss", "Juno", "Pip", "Rook", "Ivy"];
+const COLORS = ["#ffbf3f", "#4da6ff", "#ff6fb5", "#5be38a", "#c77dff", "#ff8c42"];
+
+// ── CONNECTION ──────────────────────────────────────────────────────────────────────
+// The builder fills these in for this game. Downloaded from GitHub? Put your own pk_ key here.
+const MP_CONNECT = {
+  key: 'pk_REPLACE_ME',
+  room: 'night-shift',
+  endpoint: 'wss://live.multiplayeragent.com',
+  apiUrl: 'https://api.multiplayeragent.com',
+};
+const PARAMS = new URLSearchParams(location.search), ATTRACT = PARAMS.has("attract");
+if (ATTRACT) Object.assign(CONFIG, { hourMs: 5500, briefMs: 300, wonMs: 2500, resultsMs: 2500, moveMs: 1600, lingerMs: 1300, levels: { soldier: [13, 0], bunny: [12, 0], ballerina: [10, 0] }, botMiss: 0.03, box: { drain: 6, perNight: 0, wind: 22, jackMs: 2500 }, drain: { base: 0.2, door: 0.6, light: 0.3 } });
+
+/** Same shape as the SDK client, kept in this tab: offline play and ?attract. */
+function localRoom() {
+  const id = "local", state = { entities: { players: { [id]: {} } }, shared: {} }, subs = [];
+  let queued = false;
+  const emit = () => { if (!queued) { queued = true; queueMicrotask(() => { queued = false; subs.forEach((f) => f(state)); }); } };
+  const put = (o, k, v) => { if (typeof k === "object") Object.assign(o, k); else o[k] = v; emit(); };
+  return {
+    sessionId: id, state, offline: true,
+    me: { set: (k, v) => put(state.entities.players[id], k, v) },
+    setShared: (k, v) => put(state.shared, k, v),
+    onState: (f) => { subs.push(f); f(state); }, onJoin() {}, onLeave() {}, on() {}, send() {},
+    onDisconnect() {}, onReconnect() {}, leave: async () => {},
+  };
+}
+async function connect() {
+  if (ATTRACT || typeof MP === "undefined") return localRoom();
+  try {
+    const mp = await Promise.race([MP.join({ ...MP_CONNECT }), new Promise((_, no) => setTimeout(() => no(new Error("timed out")), 10000))]);
+    window.mp = mp; // the builder calls window.mp.leave() when the page closes
+    return mp;
+  } catch (e) {
+    console.warn("Playing offline:", e && e.message);
+    return localRoom();
+  }
+}
+const parse = (v, fb) => { if (typeof v !== "string") return fb; try { return JSON.parse(v); } catch { return fb; } };
+const memo = new Map();
+/** A shared JSON field, parsed once per change (read-only: never mutate what this returns). */
+function shared(key, fb) { const raw = S.shared[key], m = memo.get(key); if (m && m.raw === raw) return m.v; const v = parse(raw, fb); memo.set(key, { raw, v }); return v; }
+let net = null, S = { entities: { players: {} }, shared: {} };
+const seenHb = new Map();
+function livePlayers() {
+  const now = performance.now(), out = [];
+  for (const [id, p] of Object.entries(S.entities.players || {})) {
+    const s = seenHb.get(id);
+    if (!s || s.hb !== p.hb) seenHb.set(id, { hb: p.hb, at: now });
+    if (id === net.sessionId || now - seenHb.get(id).at < 3000) out.push(id);
+  }
+  return out.sort();
+}
+let wakeHold = 0, lastFrameAt = 0; // a tab whose frames stopped (frozen, or in the background) doesn't act as host, nor for 700ms after it wakes (see frame())
+const isHost = () => livePlayers()[0] === net.sessionId && performance.now() >= wakeHold && !(lastFrameAt && performance.now() - lastFrameAt > 1000);
+const rnd = (a, b) => a + Math.random() * (b - a);
+
+// ── STATIONS ────────────────────────────────────────────────────────────────────────
+const ctlCache = new Map();
+/** A player's packed station field `s`: { st, at, d, l, c, w } (station, since, door shut, light on, camera, winding). */
+function ctlOf(id) { const raw = S.entities.players?.[id]?.s; let c = ctlCache.get(id); if (!c || c.raw !== raw) { c = { raw, v: parse(raw, null) }; ctlCache.set(id, c); } return c.v; }
+/** Who runs each station: { id, name, human, ctl } (ctl = that station's controls), humans first-come, bots for the rest. */
+function owners() {
+  const out = STATIONS.map(() => null);
+  const claims = livePlayers().map((id) => ({ id, c: id === net.sessionId ? mine() : ctlOf(id) })).filter((x) => x.c && x.c.st >= 0 && x.c.st < STATIONS.length);
+  claims.sort((a, b) => a.c.at - b.c.at || (a.id < b.id ? -1 : 1));
+  for (const { id, c } of claims) if (!out[c.st]) out[c.st] = { id, name: id === net.sessionId ? myName : S.entities.players[id]?.n || "Player", human: true, ctl: c };
+  const bots = shared("bots", []);
+  for (let i = 0; i < out.length; i++) if (!out[i]) { const b = isHost() && host.was ? host.bots[i] : bots[i]; out[i] = { id: "bot" + i, name: b ? b.n : "Bot", human: false, ctl: b ? (isHost() && host.was ? b : b) : { d: 0, l: 0, c: 0, w: 0 } }; }
+  return out;
+}
+
+// ── NIGHT (HOST) ────────────────────────────────────────────────────────────────────
+const host = { last: null, was: false, bots: [], again: false, toyNext: [], lastPub: 0, outAt: 0, jackAt: 0 };
+/** The night as state has it, or the host's own newer write that hasn't come back yet. `v` only goes up. */
+function night() { const g = shared("night", null); return host.last && isHost() && (!g || host.last.v > g.v) ? host.last : g; }
+function writeNight(g) { g = { ...g, v: Math.max(night()?.v ?? 0, host.last?.v ?? 0) + 1 }; host.last = g; net.setShared("night", JSON.stringify(g)); return g; }
+
+function startNight(id, n) {
+  const t = Date.now();
+  host.toyNext = TOYS.map(() => t + CONFIG.briefMs + rnd(0.5, 1.5) * CONFIG.moveMs);
+  return writeNight({ id, n, phase: "brief", startAt: t + CONFIG.briefMs, endsAt: t + CONFIG.briefMs + 6 * CONFIG.hourMs, power: 100, doors: [0, 0], lights: [0, 0], cam: 1, box: 100, jack: 0, out: 0, toys: TOYS.map(() => [0, t]), bang: 0, by: -1, nextAt: 0 });
+}
+/** Become host: carry on with the night exactly as state has it. */
+function adopt() {
+  host.was = true; host.powerFor = host.boxFor = ""; // take power and the music box from state, not from an earlier turn as host
+  const g = night(), t = Date.now(), bots = shared("bots", []);
+  host.bots = STATIONS.map((s, i) => makeBot(i, bots[i] && bots[i].n, g));
+  host.toyNext = TOYS.map(() => t + rnd(0.3, 1) * CONFIG.moveMs);
+}
+function makeBot(st, name, g) {
+  return { n: name || BOT_NAMES[st], st, d: g ? g.doors[st - 1] || 0 : 0, l: 0, c: g ? g.cam : 1, w: 0, think: 0, lightUntil: 0, seen: false };
+}
+/** How fast toy i is tonight (out of 20). */
+const level = (i, n) => { const [a, b] = CONFIG.levels[TOYS[i].kind]; return Math.min(20, a + b * (n - 1)); };
+
+function hostTick(dt, now) {
+  if (!host.was) adopt();
+  let g = night();
+  if (!g) g = startNight(1, 1);
+  const t = Date.now(), G = JSON.parse(JSON.stringify(g));
+  const own = owners();
+  botsTick(own, G, t);
+  let dirty = false;
+  const set = (k, v) => { if (JSON.stringify(G[k]) !== JSON.stringify(v)) { G[k] = v; dirty = true; } };
+  if (G.phase === "brief" && t >= G.startAt) set("phase", "play");
+  if (G.phase === "play") {
+    // Controls: from whoever runs each station. With the power out, nothing works.
+    const out = !!G.out, ctl = own.map((o) => o.ctl);
+    set("doors", out ? [0, 0] : [ctl[1].d ? 1 : 0, ctl[2].d ? 1 : 0]);
+    set("lights", out ? [0, 0] : [ctl[1].l ? 1 : 0, ctl[2].l ? 1 : 0]);
+    set("cam", out ? -1 : Math.max(0, Math.min(ROOMS.length - 1, ctl[0].c | 0)));
+    // Power: drains a little always, more for each shut door and lit light.
+    const use = CONFIG.drain.base + CONFIG.drain.door * (G.doors[0] + G.doors[1]) + CONFIG.drain.light * (G.lights[0] + G.lights[1]);
+    host.power = (host.powerFor === G.id + ":" + G.n ? host.power : G.power) - use * dt; host.powerFor = G.id + ":" + G.n;
+    if (Math.ceil(host.power) !== G.power) set("power", Math.max(0, Math.ceil(host.power)));
+    if (G.power <= 0 && !G.out) { set("out", t + rnd(...CONFIG.outMs)); }
+    // The music box: winds down unless someone winds it; silent too long and Jack pops out.
+    const winding = !out && ctl[3].w;
+    host.box = Math.max(0, Math.min(100, (host.boxFor === G.id + ":" + G.n ? host.box : G.box) + (winding ? CONFIG.box.wind : -(CONFIG.box.drain + CONFIG.box.perNight * (G.n - 1))) * dt)); host.boxFor = G.id + ":" + G.n;
+    if (Math.round(host.box / 2) * 2 !== G.box) set("box", Math.round(host.box / 2) * 2);
+    if (host.box <= 0 && !G.jack) set("jack", t + CONFIG.box.jackMs);
+    if (host.box > 0 && G.jack) set("jack", 0);
+    dirty = toysTick(G, t) || dirty;
+    if (G.phase === "play" && G.jack && t >= G.jack) { lose(G, 3, t); dirty = true; }
+    if (G.phase === "play" && G.out && t >= G.out) { lose(G, Math.floor(Math.random() * TOYS.length), t); dirty = true; }
+    if (G.phase === "play" && t >= G.endsAt) { Object.assign(G, { phase: "won", nextAt: t + CONFIG.wonMs }); dirty = true; }
+  } else if (G.phase === "won" && t >= G.nextAt) { startNight(G.id, G.n + 1); return publishBots(now); }
+  else if (G.phase === "lost" && (t >= G.nextAt || host.again)) { host.again = false; startNight(G.id + 1, 1); return publishBots(now); }
+  host.again = false;
+  if (dirty) writeNight(G);
+  publishBots(now);
+}
+function lose(G, by, t) { Object.assign(G, { phase: "lost", by, nextAt: t + CONFIG.resultsMs }); }
+/** Each toy gets a chance to move every few seconds. At a shut door it bangs and goes back; at an open one it gets in. */
+function toysTick(G, t) {
+  let dirty = false;
+  TOYS.forEach((T, i) => {
+    if (t < host.toyNext[i]) return;
+    host.toyNext[i] = t + CONFIG.moveMs * rnd(0.8, 1.2);
+    const [at, since] = G.toys[i];
+    if (T.shy && G.cam === at && at < ROOMS.length) return; // the Ballerina won't move while you watch her
+    if (at === LEFT_DOOR || at === RIGHT_DOOR) {
+      if (t - since < CONFIG.lingerMs) return;
+      if (G.doors[at - LEFT_DOOR]) { if (Math.random() < 0.6) { G.toys[i] = [Math.random() < 0.5 ? 0 : 1 + (at === RIGHT_DOOR ? 1 : 0), t]; G.bang = t; dirty = true; } } // blocked: bang, then back down the hall
+      else if (Math.random() * 20 < level(i, G.n)) { lose(G, i, t); dirty = true; }
+      return;
+    }
+    if (Math.random() * 20 >= level(i, G.n)) return;
+    const opts = T.next[at] || [0];
+    G.toys[i] = [opts[Math.floor(Math.random() * opts.length)], t]; dirty = true;
+  });
+  return dirty;
+}
+/** Bots at empty stations: the door bots check their light and shut the door on a toy; the camera bot flips cameras; the music bot winds. */
+function botsTick(own, G, t) {
+  const play = G.phase === "play" && !G.out;
+  own.forEach((o, st) => {
+    if (o.human) return;
+    const b = host.bots[st] || (host.bots[st] = makeBot(st, null, G));
+    if (!play) { b.l = 0; b.w = 0; return; }
+    if (st === 0) { // cameras: flip around, linger on the Ballerina sometimes
+      if (t > b.think) { b.think = t + rnd(1800, 3200); const ball = G.toys[2][0]; b.c = ball < ROOMS.length && Math.random() < 0.5 ? ball : Math.floor(Math.random() * ROOMS.length); }
+    } else if (st === 3) { // music box: wind when it gets low
+      if (G.box < 45) b.w = 1; else if (G.box >= 98) b.w = 0;
+    } else { // a door: flash the light every few seconds; shut the door on a toy; open it again once the hall is clear
+      const spot = st === 1 ? LEFT_DOOR : RIGHT_DOOR, toy = G.toys.some(([at]) => at === spot);
+      if (toy && !b.heard) { b.heard = true; if (Math.random() > CONFIG.botMiss * G.n) b.think = Math.min(b.think, t + rnd(300, 1600)); } // footsteps: check soon (unless it didn't hear them)
+      if (!toy) b.heard = false;
+      if (t > b.think) { b.think = t + (b.d ? rnd(1200, 2200) : rnd(2500, 5000)); b.lightUntil = t + 600; b.react = t + rnd(300, 1100); }
+      b.l = t < b.lightUntil ? 1 : 0;
+      if (t > b.react && b.lightUntil > b.react - 1200) { if (toy) b.d = 1; else if (b.d && G.power > 0) b.d = 0; b.react = Infinity; }
+    }
+  });
+}
+function publishBots(now) {
+  if (now - host.lastPub < 500) return;
+  host.lastPub = now;
+  net.setShared("bots", JSON.stringify(host.bots.map((b) => ({ n: b.n, d: b.d, l: b.l, c: b.c, w: b.w }))));
+}
+
+// ── ME ──────────────────────────────────────────────────────────────────────────────
+const FRIENDLY = ["Brave", "Quiet", "Lucky", "Swift", "Sly", "Bold"], ANIMALS = ["Otter", "Fox", "Moth", "Owl", "Badger", "Hare"];
+const myName = (() => { try { return localStorage.getItem("mpa-name") || ""; } catch { return ""; } })() || FRIENDLY[Math.floor(Math.random() * 6)] + " " + ANIMALS[Math.floor(Math.random() * 6)];
+let myColor = COLORS[0];
+const me = { st: -1, at: 0, d: 0, l: 0, c: 1, w: 0, nightKey: "", lastSent: "", sentAt: 0 };
+const mine = () => ({ st: me.st, at: me.at, d: me.d, l: me.l, c: me.c, w: me.w });
+/** Do I run this station right now (not a bot, not someone who took it before me)? */
+const iRun = (st) => { const o = owners()[st]; return o && o.id === net.sessionId; };
+function takeStation(st) {
+  const o = owners()[st];
+  if (o && o.human && o.id !== net.sessionId) return; // another player has it
+  if (me.st !== st) { me.st = st; me.at = Date.now(); me.l = 0; me.w = 0; const g = night(); if (g) { me.d = st === 1 || st === 2 ? g.doors[st - 1] : 0; me.c = g.cam >= 0 ? g.cam : me.c; } sound("click"); }
+  drawButtons();
+}
+function sendMine(force) {
+  const s = JSON.stringify(mine()), now = performance.now();
+  if (!force && s === me.lastSent && now - me.sentAt < 2000) return;
+  me.lastSent = s; me.sentAt = now; net.me.set("s", s);
+}
+
+// ── DRAW ────────────────────────────────────────────────────────────────────────────
+const cv = document.getElementById("game"), ctx = cv.getContext("2d");
+let W = 0, H = 0, DPR = 1;
+function fit() { DPR = Math.min(2, devicePixelRatio || 1); W = innerWidth; H = innerHeight; cv.width = W * DPR; cv.height = H * DPR; }
+addEventListener("resize", fit); addEventListener("orientationchange", fit); fit();
+const TOY_COLORS = { soldier: "#c8323c", bunny: "#d9b48f", ballerina: "#ff9ccf", jack: "#5ad06a" };
+/** A wind-up toy, standing at (x, y) = its feet, s = height in px. lit: drawn in light (else a silhouette with eyes). */
+function drawToy(kind, x, y, s, lit, t) {
+  ctx.save(); ctx.translate(x, y); ctx.scale(s / 100, s / 100);
+  const sway = Math.sin(t * 2.2 + x) * 3;
+  ctx.rotate(sway * 0.01);
+  const dark = (c) => (lit ? c : "#0c0a10");
+  // the wind-up key on the back, turning
+  ctx.save(); ctx.translate(kind === "ballerina" ? 0 : 20, kind === "ballerina" ? -70 : -55); ctx.scale(Math.cos(t * 4), 1);
+  ctx.fillStyle = dark("#c9a227"); ctx.fillRect(-2, -4, 22, 8); ctx.beginPath(); ctx.ellipse(24, -8, 6, 9, 0, 0, 7); ctx.ellipse(24, 8, 6, 9, 0, 0, 7); ctx.fill(); ctx.restore();
+  if (kind === "soldier") {
+    ctx.fillStyle = dark("#1d2a6b"); ctx.fillRect(-14, -40, 11, 40); ctx.fillRect(3, -40, 11, 40); // legs
+    ctx.fillStyle = dark("#c8323c"); ctx.fillRect(-18, -78, 36, 42); // coat
+    ctx.fillStyle = dark("#e9c46a"); ctx.fillRect(-18, -50, 36, 5); ctx.fillRect(-2, -76, 4, 26);
+    ctx.fillStyle = dark("#f1d2b5"); ctx.beginPath(); ctx.arc(0, -88, 12, 0, 7); ctx.fill(); // face
+    ctx.fillStyle = dark("#111"); ctx.fillRect(-13, -128, 26, 34); ctx.fillStyle = dark("#e9c46a"); ctx.fillRect(-13, -100, 26, 4); // tall hat
+    ctx.fillStyle = dark("#c8323c"); ctx.beginPath(); ctx.arc(-5, -84, 3, 0, 7); ctx.arc(5, -84, 3, 0, 7); ctx.fill();
+  } else if (kind === "bunny") {
+    ctx.fillStyle = dark("#d9b48f"); ctx.beginPath(); ctx.ellipse(0, -40, 24, 38, 0, 0, 7); ctx.fill(); // body
+    ctx.fillStyle = dark("#b38a66"); ctx.fillRect(-10, -50, 12, 12); ctx.fillStyle = dark("#7aa0c8"); ctx.fillRect(6, -30, 10, 10); // patches
+    ctx.fillStyle = dark("#d9b48f"); ctx.beginPath(); ctx.arc(0, -88, 20, 0, 7); ctx.fill(); // head
+    ctx.save(); ctx.translate(-9, -104); ctx.rotate(-0.25); ctx.beginPath(); ctx.ellipse(0, -20, 6, 24, 0, 0, 7); ctx.fill(); ctx.restore();
+    ctx.save(); ctx.translate(9, -104); ctx.rotate(0.9 + Math.sin(t * 3) * 0.1); ctx.beginPath(); ctx.ellipse(0, -18, 6, 22, 0, 0, 7); ctx.fill(); ctx.restore(); // the floppy ear
+    ctx.strokeStyle = dark("#5a3a2a"); ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(-6, -78); ctx.lineTo(6, -78); ctx.stroke(); // stitched mouth
+  } else if (kind === "ballerina") {
+    ctx.fillStyle = dark("#c9a227"); ctx.fillRect(-16, -8, 32, 8); // spring base
+    ctx.strokeStyle = dark("#999"); ctx.lineWidth = 2; ctx.beginPath(); for (let i = 0; i < 6; i++) ctx.lineTo(i % 2 ? 5 : -5, -8 - i * 5); ctx.stroke();
+    ctx.fillStyle = dark("#f1d2b5"); ctx.fillRect(-3, -60, 6, 22);
+    ctx.fillStyle = dark("#ff9ccf"); ctx.beginPath(); ctx.ellipse(0, -60, 30 + Math.sin(t * 6) * 3, 9, 0, 0, 7); ctx.fill(); // tutu
+    ctx.fillRect(-8, -88, 16, 28);
+    ctx.fillStyle = dark("#f1d2b5"); ctx.beginPath(); ctx.arc(0, -98, 11, 0, 7); ctx.fill();
+    ctx.strokeStyle = dark("#f1d2b5"); ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(-6, -84); ctx.quadraticCurveTo(-18, -112, 0, -118); ctx.quadraticCurveTo(18, -112, 6, -84); ctx.stroke(); // arms up
+    ctx.fillStyle = dark("#4a2a1a"); ctx.beginPath(); ctx.arc(0, -106, 7, 0, 7); ctx.fill(); // bun
+  } else if (kind === "jack") {
+    ctx.fillStyle = dark("#5ad06a"); ctx.fillRect(-30, -40, 60, 40); ctx.fillStyle = dark("#e84a5f"); ctx.fillRect(-30, -40, 60, 8);
+    ctx.strokeStyle = dark("#bbb"); ctx.lineWidth = 3; ctx.beginPath(); for (let i = 0; i < 8; i++) ctx.lineTo(i % 2 ? 9 : -9, -40 - i * 7); ctx.stroke();
+    ctx.fillStyle = dark("#fff2e0"); ctx.beginPath(); ctx.arc(0, -110, 22, 0, 7); ctx.fill();
+    ctx.fillStyle = dark("#e84a5f"); ctx.beginPath(); ctx.arc(0, -104, 6, 0, 7); ctx.fill(); ctx.beginPath(); ctx.moveTo(-22, -122); ctx.lineTo(0, -150); ctx.lineTo(22, -122); ctx.fill();
+    ctx.strokeStyle = dark("#222"); ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(0, -100, 12, 0.2, Math.PI - 0.2); ctx.stroke();
+  }
+  // eyes: always glow, even in the dark
+  const ey = { soldier: -90, bunny: -92, ballerina: -100, jack: -114 }[kind], ex = kind === "jack" ? 9 : 6;
+  ctx.fillStyle = lit ? "#111" : "#ffe9a8"; ctx.shadowColor = "#ffe9a8"; ctx.shadowBlur = lit ? 0 : 10;
+  ctx.beginPath(); ctx.arc(-ex, ey, kind === "bunny" ? 4 : 3, 0, 7); ctx.arc(ex, ey + (kind === "bunny" ? 4 : 0), 3, 0, 7); ctx.fill();
+  ctx.restore();
+}
+/** Static noise over a rect (cheap: a few hundred random bars). */
+function staticNoise(x, y, w, h, a) { for (let i = 0; i < 160; i++) { ctx.fillStyle = `rgba(255,255,255,${Math.random() * a})`; ctx.fillRect(x + Math.random() * w, y + Math.random() * h, 2 + Math.random() * 30, 1.5); } }
+/** A camera feed: the room, its shelves, any toy in it, scanlines and the CAM label. */
+function drawCam(r, cam, g, t) {
+  ctx.save(); ctx.beginPath(); ctx.rect(r.x, r.y, r.w, r.h); ctx.clip();
+  if (cam < 0) { ctx.fillStyle = "#050507"; ctx.fillRect(r.x, r.y, r.w, r.h); ctx.fillStyle = "#666"; ctx.font = "bold 16px system-ui"; ctx.textAlign = "center"; ctx.fillText("NO POWER", r.x + r.w / 2, r.y + r.h / 2); ctx.restore(); return; }
+  const R = ROOMS[cam], hall = cam >= 3, fy = r.y + r.h * 0.68;
+  ctx.fillStyle = R.wall; ctx.fillRect(r.x, r.y, r.w, r.h);
+  const grd = ctx.createLinearGradient(0, fy, 0, r.y + r.h); grd.addColorStop(0, "#2a2530"); grd.addColorStop(1, "#141218"); ctx.fillStyle = grd; ctx.fillRect(r.x, fy, r.w, r.y + r.h - fy);
+  if (hall) { // a corridor in perspective, toward the office door
+    ctx.fillStyle = "#1a1820"; ctx.beginPath(); ctx.moveTo(r.x + r.w * 0.35, r.y + r.h * 0.25); ctx.lineTo(r.x + r.w * 0.65, r.y + r.h * 0.25); ctx.lineTo(r.x + r.w * 0.65, fy - r.h * 0.12); ctx.lineTo(r.x + r.w * 0.35, fy - r.h * 0.12); ctx.fill();
+    ctx.strokeStyle = "#ffffff18"; ctx.lineWidth = 2; for (const [a, b] of [[0, 0.35], [1, 0.65]]) { ctx.beginPath(); ctx.moveTo(r.x + r.w * a, r.y + r.h); ctx.lineTo(r.x + r.w * b, fy - r.h * 0.12); ctx.stroke(); }
+    ctx.fillStyle = "#c9a22a55"; ctx.fillRect(r.x + r.w * 0.47, fy - r.h * 0.1, r.w * 0.06, r.h * 0.4); // a hazard stripe down the middle
+  } else { // shelves with toy boxes
+    for (let s = 0; s < 3; s++) {
+      const sy = r.y + r.h * (0.18 + s * 0.17);
+      ctx.fillStyle = R.shelf; ctx.fillRect(r.x + r.w * 0.04, sy + r.h * 0.12, r.w * 0.92, r.h * 0.025);
+      for (let b = 0; b < 9; b++) { const bw = r.w * 0.07, bh = r.h * (0.06 + ((b * 7 + s * 3 + cam) % 5) * 0.012); ctx.fillStyle = ["#7a4a6a", "#4a6a8a", "#8a7a3a", "#3a7a5a", "#8a4a3a"][(b + s + cam) % 5]; ctx.fillRect(r.x + r.w * (0.07 + b * 0.1), sy + r.h * 0.12 - bh, bw, bh); }
+    }
+  }
+  // toys in this room, each at its own spot
+  const here = g.toys.map(([at], i) => (at === cam ? i : -1)).filter((i) => i >= 0);
+  here.forEach((i, k) => drawToy(TOYS[i].kind, r.x + r.w * (hall ? 0.5 + (k - (here.length - 1) / 2) * 0.18 : 0.3 + ((i * 0.27) % 0.5)), hall ? fy - r.h * 0.04 + k * 6 : fy + r.h * 0.12, r.h * (hall ? 0.5 : 0.48), true, t));
+  // camera look: a green tint, scanlines, a vignette, static that spikes right after something moved
+  ctx.fillStyle = "#3aff8a10"; ctx.fillRect(r.x, r.y, r.w, r.h);
+  ctx.fillStyle = "#0000002a"; for (let y = r.y; y < r.y + r.h; y += 4) ctx.fillRect(r.x, y, r.w, 2);
+  const moved = g.toys.some(([, since]) => Date.now() - since < 700); // something just moved: the feeds crackle
+  staticNoise(r.x, r.y, r.w, r.h, moved ? 0.45 : 0.08);
+  const vg = ctx.createRadialGradient(r.x + r.w / 2, r.y + r.h / 2, r.h * 0.3, r.x + r.w / 2, r.y + r.h / 2, r.w * 0.75); vg.addColorStop(0, "#0000"); vg.addColorStop(1, "#000b"); ctx.fillStyle = vg; ctx.fillRect(r.x, r.y, r.w, r.h);
+  ctx.fillStyle = "#e8ffe8"; ctx.font = `bold ${Math.max(11, r.h * 0.05)}px ui-monospace, monospace`; ctx.textAlign = "left";
+  ctx.fillText(`CAM ${cam + 1} · ${R.name.toUpperCase()}`, r.x + 10, r.y + 10 + r.h * 0.05);
+  if (Math.sin(t * 4) > 0) { ctx.fillStyle = "#ff4d5e"; ctx.beginPath(); ctx.arc(r.x + r.w - 18, r.y + 18, 6, 0, 7); ctx.fill(); }
+  ctx.restore();
+}
+/** A door, seen from inside the office: the dark hall, the light, whoever stands there, the shutter. */
+function drawDoor(r, side, g, t, shutAnim, lightOn) {
+  ctx.save(); ctx.beginPath(); ctx.rect(r.x, r.y, r.w, r.h); ctx.clip();
+  ctx.fillStyle = "#18151d"; ctx.fillRect(r.x, r.y, r.w, r.h); // office wall
+  for (let i = 0; i < 6; i++) { ctx.fillStyle = i % 2 ? "#1d1a24" : "#211d29"; ctx.fillRect(r.x + (i * r.w) / 6, r.y, r.w / 6, r.h); }
+  const dw = Math.min(r.w * 0.5, r.h * 0.42), dh = r.h * 0.72, dx = r.x + (r.w - dw) / 2, dy = r.y + r.h * 0.14;
+  // the hall beyond: black, or lit by the door light
+  const spot = side === 0 ? LEFT_DOOR : RIGHT_DOOR, toy = g.toys.findIndex(([at]) => at === spot);
+  ctx.fillStyle = lightOn ? "#4a4030" : "#030305"; ctx.fillRect(dx, dy, dw, dh);
+  if (lightOn) { const lg = ctx.createRadialGradient(dx + dw / 2, dy + dh * 0.85, 4, dx + dw / 2, dy + dh * 0.6, dh * 0.8); lg.addColorStop(0, "#fff1c4aa"); lg.addColorStop(1, "#0000"); ctx.fillStyle = lg; ctx.fillRect(dx, dy, dw, dh); }
+  if (toy >= 0 && lightOn) drawToy(TOYS[toy].kind, dx + dw / 2, dy + dh * 0.98, dh * 0.82, true, t); // you only see it with the light on
+  // the shutter slides down when shut
+  if (shutAnim > 0) {
+    const sh = dh * shutAnim;
+    ctx.fillStyle = "#5a5f68"; ctx.fillRect(dx, dy, dw, sh);
+    ctx.fillStyle = "#454950"; for (let y = dy + 8; y < dy + sh; y += 14) ctx.fillRect(dx, y, dw, 3);
+    ctx.fillStyle = "#c9a22a"; for (let x = dx - 20; x < dx + dw; x += 24) { ctx.beginPath(); ctx.moveTo(x, dy + sh); ctx.lineTo(x + 12, dy + sh); ctx.lineTo(x + 24, dy + sh - 12); ctx.lineTo(x + 12, dy + sh - 12); ctx.fill(); }
+  }
+  ctx.strokeStyle = "#3a3542"; ctx.lineWidth = 10; ctx.strokeRect(dx - 5, dy - 5, dw + 10, dh + 10); // frame
+  // the two buttons on the wall beside the door
+  const bx = side === 0 ? dx + dw + 22 : dx - 22, lamp = (y, on, c) => { ctx.fillStyle = on ? c : "#333"; ctx.shadowColor = c; ctx.shadowBlur = on ? 14 : 0; ctx.beginPath(); ctx.arc(bx, y, 9, 0, 7); ctx.fill(); ctx.shadowBlur = 0; };
+  lamp(dy + dh * 0.4, g.doors[side], "#ff4d5e"); lamp(dy + dh * 0.55, lightOn, "#fff1c4");
+  // a poster on the wall, and the desk edge in front of you
+  const px = side === 0 ? r.x + r.w * 0.08 : r.x + r.w * 0.78, pw = r.w * 0.14;
+  if (pw > 40) { ctx.fillStyle = "#e9d8a6"; ctx.fillRect(px, r.y + r.h * 0.25, pw, pw * 1.3); ctx.fillStyle = "#c8323c"; ctx.font = `bold ${pw * 0.2}px system-ui`; ctx.textAlign = "center"; ctx.fillText("TOY", px + pw / 2, r.y + r.h * 0.25 + pw * 0.45); ctx.fillText("LAND", px + pw / 2, r.y + r.h * 0.25 + pw * 0.7); ctx.fillStyle = "#1d2a6b"; ctx.fillRect(px + pw * 0.3, r.y + r.h * 0.25 + pw * 0.85, pw * 0.4, pw * 0.3); }
+  drawDesk(r, t);
+  ctx.fillStyle = "#ddd"; ctx.font = `bold ${Math.max(12, r.h * 0.045)}px system-ui`; ctx.textAlign = "center";
+  ctx.fillText(side === 0 ? "LEFT DOOR" : "RIGHT DOOR", r.x + r.w / 2, r.y + r.h * 0.08);
+  ctx.restore();
+}
+/** The front edge of the guard desk: a cup of coffee and a little fan. */
+function drawDesk(r, t) {
+  const y = r.y + r.h * 0.9;
+  ctx.fillStyle = "#3b2c22"; ctx.fillRect(r.x, y, r.w, r.h * 0.1); ctx.fillStyle = "#4e3a2c"; ctx.fillRect(r.x, y, r.w, 4);
+  const s = r.h * 0.06;
+  ctx.fillStyle = "#e9e3d0"; ctx.fillRect(r.x + r.w * 0.12, y - s, s * 0.8, s); ctx.fillStyle = "#6a4a2a"; ctx.fillRect(r.x + r.w * 0.12, y - s, s * 0.8, s * 0.25);
+  const fx = r.x + r.w * 0.85, fy = y - s * 1.6;
+  ctx.fillStyle = "#555"; ctx.fillRect(fx - 2, fy, 4, s * 1.6);
+  ctx.save(); ctx.translate(fx, fy); ctx.rotate(t * 14); ctx.fillStyle = "#8a8f96"; for (let i = 0; i < 3; i++) { ctx.rotate((Math.PI * 2) / 3); ctx.beginPath(); ctx.ellipse(s * 0.45, 0, s * 0.45, s * 0.16, 0, 0, 7); ctx.fill(); } ctx.restore();
+}
+/** The music box on its shelf. If it runs out, Jack's box starts shaking. */
+function drawMusic(r, g, t, winding) {
+  ctx.save(); ctx.beginPath(); ctx.rect(r.x, r.y, r.w, r.h); ctx.clip();
+  ctx.fillStyle = "#1c1620"; ctx.fillRect(r.x, r.y, r.w, r.h);
+  const cx = r.x + r.w / 2, base = r.y + r.h * 0.75, s = Math.min(r.w, r.h);
+  ctx.fillStyle = "#3a2a22"; ctx.fillRect(r.x, base, r.w, r.h * 0.04); // shelf
+  const shake = g.jack ? Math.sin(t * 60) * s * 0.012 : g.box < 30 ? Math.sin(t * 30) * s * 0.004 : 0;
+  // Jack, peeking out of a trembling box when the music stops
+  const pop = g.phase === "lost" && g.by === 3 ? 1 : g.jack ? 0.15 : 0;
+  if (pop) drawToy("jack", cx + shake, base - s * 0.02, s * 0.5 * (0.6 + pop * 0.6), true, t);
+  else { ctx.fillStyle = "#5ad06a"; ctx.fillRect(cx - s * 0.12 + shake, base - s * 0.2, s * 0.24, s * 0.2); ctx.fillStyle = "#e84a5f"; ctx.fillRect(cx - s * 0.13 + shake, base - s * 0.22, s * 0.26, s * 0.04); ctx.fillStyle = "#fff"; ctx.font = `bold ${s * 0.05}px system-ui`; ctx.textAlign = "center"; ctx.fillText("JACK", cx + shake, base - s * 0.08); }
+  // the crank
+  ctx.save(); ctx.translate(cx + s * 0.16, base - s * 0.12); ctx.rotate(winding ? t * 8 : 0); ctx.fillStyle = "#c9a227"; ctx.fillRect(0, -3, s * 0.08, 6); ctx.beginPath(); ctx.arc(s * 0.08, 0, 6, 0, 7); ctx.fill(); ctx.restore();
+  // the meter: a ring that empties
+  const mr = s * 0.13, my = r.y + r.h * 0.3;
+  ctx.lineWidth = s * 0.03; ctx.strokeStyle = "#ffffff1a"; ctx.beginPath(); ctx.arc(cx, my, mr, 0, 7); ctx.stroke();
+  ctx.strokeStyle = g.box < 30 ? "#ff4d5e" : "#ffbf3f"; ctx.beginPath(); ctx.arc(cx, my, mr, -Math.PI / 2, -Math.PI / 2 + (Math.PI * 2 * g.box) / 100); ctx.stroke();
+  ctx.fillStyle = "#fff"; ctx.font = `bold ${s * 0.06}px system-ui`; ctx.textAlign = "center"; ctx.fillText(winding ? "♪ ♫" : `${g.box}%`, cx, my + s * 0.02);
+  if (winding) for (let i = 0; i < 3; i++) { const k = (t * 0.8 + i / 3) % 1; ctx.fillStyle = `rgba(255,191,63,${1 - k})`; ctx.font = `bold ${s * 0.05}px system-ui`; ctx.fillText("♪", cx + Math.sin(i * 2 + t) * s * 0.2, base - s * 0.25 - k * s * 0.3); }
+  drawDesk(r, t);
+  ctx.fillStyle = "#ddd"; ctx.font = `bold ${Math.max(12, r.h * 0.045)}px system-ui`; ctx.textAlign = "center"; ctx.fillText("MUSIC BOX", cx, r.y + r.h * 0.08);
+  ctx.restore();
+}
+const shutAnim = [0, 0];
+/** One station's view in a rect. */
+function drawStation(st, r, g, t, own) {
+  const o = own[st], mineNow = o && o.id === net.sessionId;
+  if (st === 0) drawCam(r, mineNow && g.phase === "play" && !g.out ? me.c : g.cam, g, t);
+  else if (st === 3) drawMusic(r, g, t, mineNow ? !!me.w && !g.out : !!(o && o.ctl.w));
+  else drawDoor(r, st - 1, g, t, shutAnim[st - 1], (mineNow ? !!me.l : !!g.lights[st - 1]) && !g.out);
+}
+let scare = null; // { kind, at } while a jumpscare plays
+function draw(g, t, dt) {
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  ctx.fillStyle = "#07060b"; ctx.fillRect(0, 0, W, H);
+  const own = owners();
+  for (let s = 0; s < 2; s++) { const shut = (iRun(s + 1) ? me.d : g.doors[s]) && !g.out ? 1 : 0; shutAnim[s] += (shut - shutAnim[s]) * Math.min(1, dt * 12); }
+  if (ATTRACT) { // the monitor wall: all four stations at once
+    const gap = 6, w = (W - gap * 3) / 2, h = (H - gap * 3) / 2;
+    [0, 1, 3, 2].forEach((st, k) => drawStation(st, { x: gap + (k % 2) * (w + gap), y: gap + Math.floor(k / 2) * (h + gap), w, h }, g, t, own));
+    const label = `${hourText(hourOf(g))}  ⚡${g.power}%`;
+    ctx.font = "bold 20px system-ui"; ctx.textAlign = "center"; const bw = ctx.measureText(label).width + 28;
+    ctx.fillStyle = "#07060bdd"; ctx.beginPath(); ctx.roundRect(W / 2 - bw / 2, H / 2 - 18, bw, 36, 18); ctx.fill();
+    ctx.fillStyle = g.power < 20 ? "#ff4d5e" : "#ffbf3f"; ctx.fillText(label, W / 2, H / 2 + 7);
+  } else {
+    const top = ($("radio").getBoundingClientRect().bottom || 90) + 6, bottom = $("controls").getBoundingClientRect().top - 8;
+    const h = Math.max(120, bottom - top), w = Math.min(W - 24, h * 1.9), r = { x: (W - w) / 2, y: top, w, h }; // not wider than a monitor
+    if (me.st >= 0) drawStation(me.st, r, g, t, own);
+    ctx.strokeStyle = "#ffffff22"; ctx.lineWidth = 2; ctx.strokeRect(r.x, r.y, r.w, r.h);
+  }
+  if (g.out && g.phase === "play") { ctx.fillStyle = `rgba(0,0,0,${0.55 + 0.1 * Math.sin(t * 3)})`; ctx.fillRect(0, 0, W, H); }
+  // the jumpscare: the toy that got in fills the screen and shakes
+  if (scare) {
+    const k = (performance.now() - scare.at) / 1000;
+    if (k > 1.6) scare = null;
+    else { const size = H * Math.min(1.25, 0.6 + k * 1.6); ctx.fillStyle = `rgba(20,0,0,${Math.min(0.9, k * 3)})`; ctx.fillRect(0, 0, W, H); drawToy(scare.kind, W / 2 + (Math.random() - 0.5) * 30, H * 0.45 + size * 0.9, size, true, t); } // the face lands mid-screen
+  }
+}
+
+// ── HUD & RESULTS ───────────────────────────────────────────────────────────────────
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+const hourOf = (g) => (g.phase === "brief" ? 0 : Math.min(6, Math.floor((Date.now() - g.startAt) / CONFIG.hourMs)));
+const hourText = (h) => (h === 0 ? "12 AM" : h + " AM");
+let board = null, boardFor = "", dropped = false, buttonsKey = "";
+/** The action buttons for my station, and the station tabs. Rebuilt only when something on them changes. */
+function drawButtons() {
+  const g = night(), own = owners();
+  const key = JSON.stringify([me.st, me.d, me.l, me.c, me.w, own.map((o) => o && o.name + o.human + o.id), g && g.out]);
+  if (key === buttonsKey) return;
+  buttonsKey = key;
+  let a = "";
+  if (me.st === 0) a = ROOMS.map((R, i) => `<button class="cam ${me.c === i ? "on" : ""}" data-a="cam" data-i="${i}">CAM ${i + 1}<br>${R.short}</button>`).join("");
+  else if (me.st === 1 || me.st === 2) a = `<button data-a="door" class="${me.d ? "shut" : ""}">${me.d ? "OPEN DOOR" : "SHUT DOOR"}</button><button data-a="light" class="${me.l ? "on" : ""}">HOLD LIGHT</button>`;
+  else if (me.st === 3) a = `<button data-a="wind" class="${me.w ? "on" : ""}">HOLD TO WIND</button>`;
+  $("actions").innerHTML = a;
+  $("tabs").innerHTML = STATIONS.map((S_, i) => { const o = own[i]; const mineT = o && o.id === net.sessionId; return `<button data-st="${i}" class="${mineT ? "mine" : o && o.human ? "human" : ""}"><b>${S_.label}</b><span style="color:${o && o.human ? (S.entities.players[o.id]?.c || myColor) : "inherit"}">${mineT ? "You" : o ? esc(o.name) + (o.human ? "" : " (bot)") : ""}</span></button>`; }).join("");
+}
+/** What the camera station sees, said out loud for the whole team. */
+function radioLine(g, own) {
+  if (g.phase !== "play" || g.out || g.cam < 0) return "";
+  const at = g.toys.map(([a], i) => (a === g.cam ? TOYS[i].name : "")).filter(Boolean), who = own[0] && own[0].id === net.sessionId ? "You" : own[0] ? own[0].name : "Cams";
+  return at.length ? `📷 ${esc(who)}: ${at.join(" and ")} on CAM ${g.cam + 1} (${ROOMS[g.cam].name})!` : `📷 ${esc(who)}: CAM ${g.cam + 1} (${ROOMS[g.cam].name}) is clear`;
+}
+function hud(g) {
+  const t = Date.now(), own = owners(), h = hourOf(g);
+  drawButtons();
+  if (ATTRACT) { for (const id of ["status", "radio", "msg", "net"]) $(id).textContent = ""; $("clock").innerHTML = `${hourText(h)}`; $("power").innerHTML = `${g.power}%`; return; }
+  $("clock").innerHTML = `${hourText(h)}<small>Night ${g.n}${g.phase === "play" ? ` · ${Math.max(0, Math.ceil((g.endsAt - t) / 1000))}s to 6 AM` : ""}</small>`;
+  const use = 1 + g.doors[0] + g.doors[1] + g.lights[0] + g.lights[1];
+  $("power").innerHTML = `⚡ ${g.power}%<small>usage ${"▮".repeat(use)}${"▯".repeat(5 - use)}</small>`;
+  $("power").classList.toggle("low", g.power < 20);
+  const door = (s) => (g.doors[s] ? `<span class="bad">shut</span>` : `<b>open</b>`);
+  $("status").innerHTML = `Left ${door(0)}${g.lights[0] ? " 💡" : ""} · Right ${door(1)}${g.lights[1] ? " 💡" : ""} · Music <span class="${g.box < 30 ? "bad" : "ok"}">${g.box}%</span>`;
+  $("radio").textContent = g.out ? "⚠ The power is out…" : g.jack ? "🎵 The music stopped! Wind the music box!" : radioLine(g, own);
+  let msg = "";
+  if (g.phase === "brief") msg = `Night ${g.n}. Keep the toys out of the office until 6 AM.`;
+  else if (g.phase === "play" && t - g.startAt < 12000) msg = touchUI ? "Pick a station below · doors cost power · listen for footsteps" : "1–4 pick a station · Space: door / wind / next cam · hold L: light · doors cost power";
+  else if (g.phase === "play" && me.st >= 0 && !iRun(me.st)) msg = "Another player took that station. Pick a free one.";
+  $("msg").textContent = msg;
+  const n = livePlayers().length;
+  $("net").textContent = net.offline ? "Offline: playing with bots" : dropped ? "Reconnecting…" : `Online · ${n} player${n === 1 ? "" : "s"}${isHost() ? " · you run the toys" : ""}`;
+  const over = g.phase === "won" || g.phase === "lost";
+  $("over").hidden = !over || !!scare;
+  if (over) {
+    $("overTitle").textContent = g.phase === "won" ? "6 AM! You made it." : `${TOYS[g.by] ? TOYS[g.by].name[4].toUpperCase() + TOYS[g.by].name.slice(5) : "Jack"} got in!`;
+    $("overLine").textContent = g.phase === "won" ? `Night ${g.n} survived with ${g.power}% power left. Night ${g.n + 1} is worse.` : `${g.by === 3 ? "The music box ran down" : g.power <= 0 ? "The power ran out" : "A door was open"} at ${hourText(h)} on night ${g.n}.`;
+    $("next").textContent = g.phase === "won" ? `Night ${g.n + 1} starts in ${Math.max(0, Math.ceil((g.nextAt - t) / 1000))}s` : `Back to night 1 in ${Math.max(0, Math.ceil((g.nextAt - t) / 1000))}s`;
+    $("again").hidden = g.phase !== "lost";
+    if (boardFor !== g.id + ":" + g.n + g.phase) { boardFor = g.id + ":" + g.n + g.phase; showBoard(g); }
+  }
+}
+function showBoard(g) {
+  const list = $("board");
+  if (!board) { list.innerHTML = "<li>Leaderboards need a connection.</li>"; return; }
+  const submit = g.phase === "won" && me.nightKey === g.id + ":" + g.n ? board.submit(g.n).catch(() => null) : Promise.resolve();
+  submit.then(() => board.top(10)).then(({ entries }) => {
+    list.innerHTML = entries.length ? entries.map((e) => `<li>${esc(e.username || "Player")}<span>${e.score} night${e.score === 1 ? "" : "s"}</span></li>`).join("") : "<li>Nobody has made it to 6 AM yet.</li>";
+  }).catch(() => { list.innerHTML = "<li>Couldn't load the leaderboard.</li>"; });
+}
+/** Keep a color nobody else has: the later sessionId gives way. */
+function fixColor() {
+  const others = Object.entries(S.entities.players || {}).filter(([id]) => id !== net.sessionId);
+  if (!others.some(([id, p]) => id < net.sessionId && p.c === myColor)) return;
+  const used = new Set(others.map(([, p]) => p.c));
+  myColor = COLORS.find((c) => !used.has(c)) || myColor;
+  net.me.set("c", myColor);
+}
+$("again").onclick = () => { if (isHost()) host.again = true; else net.send("again", {}); };
+
+/** One-off effects worked out from what changed in state (so nobody misses one). */
+let prevG = null;
+function effects(g) {
+  if (prevG && prevG.id === g.id && prevG.n === g.n) {
+    g.toys.forEach(([at], i) => { const was = prevG.toys[i][0]; if (at !== was && (at === LEFT_DOOR || at === RIGHT_DOOR)) sound("steps", at === LEFT_DOOR ? -0.8 : 0.8); });
+    if (g.bang !== prevG.bang) { sound("bang"); shake = 0.4; }
+    for (const s of [0, 1]) if (g.doors[s] !== prevG.doors[s]) sound("door", s ? 0.8 : -0.8);
+    if (g.out && !prevG.out) sound("powerdown");
+    if (g.phase === "lost" && prevG.phase !== "lost") { scare = { kind: TOYS[g.by] ? TOYS[g.by].kind : "jack", at: performance.now() }; sound("scream"); }
+    if (g.phase === "won" && prevG.phase !== "won") sound("chime");
+  }
+  prevG = g;
+}
+
+// ── INPUT & SOUND ───────────────────────────────────────────────────────────────────
+const touchUI = matchMedia("(pointer: coarse)").matches && !ATTRACT;
+$("controls").hidden = ATTRACT; $("top").hidden = ATTRACT;
+function press(a, i, down) {
+  if (!iRun(me.st)) return;
+  const g = night(); if (!g || g.phase !== "play" || g.out) { if (a !== "cam") return; }
+  if (a === "door" && down) { me.d = me.d ? 0 : 1; }
+  if (a === "light") me.l = down ? 1 : 0;
+  if (a === "wind") me.w = down ? 1 : 0;
+  if (a === "cam" && down) { me.c = i; sound("blip"); }
+  sendMine(true); drawButtons();
+}
+$("actions").addEventListener("pointerdown", (e) => { const b = e.target.closest("button"); if (!b) return; e.preventDefault(); unlockAudio(); b.setPointerCapture?.(e.pointerId); press(b.dataset.a, +b.dataset.i, true); });
+for (const ev of ["pointerup", "pointercancel", "lostpointercapture"]) $("actions").addEventListener(ev, (e) => { const b = e.target.closest("button"); if (b && (b.dataset.a === "light" || b.dataset.a === "wind")) press(b.dataset.a, 0, false); });
+$("tabs").addEventListener("pointerdown", (e) => { const b = e.target.closest("button"); if (b) { e.preventDefault(); unlockAudio(); takeStation(+b.dataset.st); } });
+addEventListener("keydown", (e) => {
+  unlockAudio();
+  if (e.key >= "1" && e.key <= "4" && !e.repeat) takeStation(+e.key - 1);
+  if (e.key === " " && !e.repeat) { e.preventDefault(); if (me.st === 0) press("cam", (me.c + 1) % ROOMS.length, true); else if (me.st === 3) press("wind", 0, true); else press("door", 0, true); }
+  if (e.key === "ArrowRight" && me.st === 0) press("cam", (me.c + 1) % ROOMS.length, true);
+  if (e.key === "ArrowLeft" && me.st === 0) press("cam", (me.c + ROOMS.length - 1) % ROOMS.length, true);
+  if ((e.key.toLowerCase() === "l" || e.key === "Shift") && !e.repeat) press("light", 0, true);
+});
+addEventListener("keyup", (e) => { if (e.key === " " && me.st === 3) press("wind", 0, false); if (e.key.toLowerCase() === "l" || e.key === "Shift") press("light", 0, false); });
+addEventListener("blur", () => { if (me.l || me.w) { me.l = 0; me.w = 0; sendMine(true); } });
+document.addEventListener("touchmove", (e) => { if (!e.target.closest(".card")) e.preventDefault(); }, { passive: false });
+
+let AC = null;
+function unlockAudio() { if (!AC && !ATTRACT) try { AC = new AudioContext(); } catch {} }
+function sound(kind, pan = 0) {
+  if (!AC) return;
+  const t0 = AC.currentTime, out = AC.createStereoPanner ? AC.createStereoPanner() : AC.createGain();
+  if (out.pan) out.pan.value = pan; out.connect(AC.destination);
+  const tone = (f, d, type, v, f2, at = 0) => {
+    const o = AC.createOscillator(), g = AC.createGain(); o.type = type; o.frequency.setValueAtTime(f, t0 + at); o.frequency.exponentialRampToValueAtTime(f2, t0 + at + d);
+    g.gain.setValueAtTime(v, t0 + at); g.gain.exponentialRampToValueAtTime(0.001, t0 + at + d); o.connect(g).connect(out); o.start(t0 + at); o.stop(t0 + at + d);
+  };
+  if (kind === "click") tone(1200, 0.04, "square", 0.05, 900);
+  if (kind === "blip") tone(1800, 0.05, "square", 0.04, 1400);
+  if (kind === "door") tone(120, 0.25, "square", 0.12, 60);
+  if (kind === "steps") for (let i = 0; i < 4; i++) tone(90, 0.08, "triangle", 0.25, 60, i * 0.28);
+  if (kind === "bang") { tone(70, 0.3, "square", 0.25, 40); tone(70, 0.3, "square", 0.25, 40, 0.25); }
+  if (kind === "powerdown") tone(400, 2, "sawtooth", 0.1, 30);
+  if (kind === "scream") { tone(900, 1.2, "sawtooth", 0.2, 200); tone(1300, 1.2, "square", 0.08, 300); }
+  if (kind === "chime") [523, 659, 784, 1046].forEach((f, i) => tone(f, 0.5, "triangle", 0.12, f, i * 0.18));
+  if (kind === "note") tone([784, 659, 698, 523, 587][Math.floor(Math.random() * 5)], 0.3, "sine", 0.06, 780);
+}
+
+// ── MAIN LOOP ───────────────────────────────────────────────────────────────────────
+let last = performance.now(), lastHb = 0, lastHud = 0, lastNote = 0, shake = 0;
+function frame(now) {
+  requestAnimationFrame(frame);
+  const realNow = performance.now(); // timed on the real clock: after a long freeze the rAF time can be from before the wake
+  if (lastFrameAt && realNow - lastFrameAt > 1000) { wakeHold = realNow + 700; host.was = false; host.last = null; host.powerFor = host.boxFor = ""; } lastFrameAt = realNow; // woke from a freeze or a background tab: let the newer state arrive, then adopt it like a new host
+  const dt = Math.max(0, Math.min(0.05, (now - last) / 1000)), t = now / 1000; last = now; // never negative: the first frame can be stamped before `last`
+  if (now - lastHb > 1000) { lastHb = now; net.me.set("hb", Date.now()); fixColor(); }
+  if (isHost()) hostTick(dt, now); else host.was = false;
+  const g = night();
+  if (!g) return;
+  const key = g.id + ":" + g.n;
+  if (me.nightKey !== key) { me.nightKey = key; me.d = 0; me.l = 0; me.w = 0; scare = null; sendMine(true); } // a new night: every door opens
+  if (!ATTRACT && (me.st < 0 || (!iRun(me.st) && g.phase === "brief"))) { const free = owners().findIndex((o) => !o.human); if (free >= 0) takeStation(free); } // sit at the first station a bot is running
+  sendMine(false);
+  effects(g);
+  if (me.w && iRun(3) && now - lastNote > 280) { lastNote = now; sound("note"); }
+  shake = Math.max(0, shake - dt);
+  ctx.save(); if (shake) ctx.translate((Math.random() - 0.5) * shake * 30, (Math.random() - 0.5) * shake * 30);
+  draw(g, t, dt);
+  ctx.restore();
+  if (now - lastHud > 150) { lastHud = now; hud(g); }
+}
+
+(async function start() {
+  net = await connect();
+  net.onState((st) => { S = st; });
+  net.on("again", () => { const g = night(); if (isHost() && g && g.phase === "lost") host.again = true; });
+  net.onDisconnect(() => { dropped = true; $("net").textContent = "Reconnecting…"; });
+  net.onReconnect(() => { dropped = false; });
+  if (!net.offline && typeof MP !== "undefined") board = MP.auth({ key: MP_CONNECT.key, apiUrl: MP_CONNECT.apiUrl }).leaderboard(CONFIG.board);
+  const taken = new Set(Object.entries(S.entities.players || {}).filter(([id]) => id !== net.sessionId).map(([, p]) => p.c));
+  myColor = COLORS.find((c) => !taken.has(c)) || COLORS[Math.floor(Math.random() * COLORS.length)];
+  net.me.set({ n: myName, c: myColor, hb: Date.now() });
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

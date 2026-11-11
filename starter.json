@@ -1,0 +1,21 @@
+{
+  "name": "Night Shift",
+  "genre": "horror",
+  "dim": "2D",
+  "mode": "Co-op",
+  "players": "1–4",
+  "hook": "Guard the toy shop until 6 AM. Shut the doors.",
+  "how": "The wind-up toys walk at night. Split the guard stations: one watches the cameras, two hold the doors and one keeps the music box playing. Doors and lights eat power, so shut them only when something is there.",
+  "controls": "1–4 picks a station, Space shuts the door, winds or flips the camera, hold L for the door light, or tap the buttons",
+  "uses": [
+    ["Host-run rules", "The host's browser moves the toys, drains the power and runs the clock; if it leaves, the next player takes over."],
+    ["Bots", "Bots run every station nobody has taken, so you can play alone."],
+    ["Live sync", "Every door, light and camera switch shows for the whole team at once."],
+    ["Leaderboard", "The most nights survived."]
+  ],
+  "ideas": [
+    "Add a fifth toy that crawls through the air vent",
+    "Make the power come back a little at 3 AM",
+    "Add a hiding mask that fools the Ballerina"
+  ]
+}
