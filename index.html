@@ -32,6 +32,7 @@
   .card { width: min(380px, calc(100vw - 32px)); max-height: 86vh; overflow: auto; padding: 20px; border-radius: 16px; background: #17141f; border: 1px solid #ffffff22; box-sizing: border-box; text-align: center; }
   .card h2 { margin: 0 0 4px; font-size: 26px; } .card h3 { margin: 14px 0 4px; font-size: 14px; color: var(--amber); text-align: left; }
   .card ol { margin: 0; padding-left: 24px; font-size: 14px; text-align: left; } .card li span { float: right; font-variant-numeric: tabular-nums; }
+  .card li.note { list-style: none; margin-left: -24px; } /* a status line, not a numbered entry */
   .card p { margin: 6px 0 0; font-size: 14px; opacity: .85; }
   button.go { margin-top: 16px; width: 100%; min-height: 48px; border: 0; border-radius: 12px; background: var(--amber); color: #2a1a00; font: 800 17px system-ui, sans-serif; cursor: pointer; }
 </style>
@@ -47,7 +48,7 @@
 <div class="hud" id="net">Connecting…</div>
 <div id="over" hidden><div class="card">
   <h2 id="overTitle"></h2><p id="overLine"></p>
-  <h3>Most nights survived</h3><ol id="board"><li>Loading…</li></ol>
+  <h3>Most nights survived</h3><ol id="board"><li class="note">Loading…</li></ol>
   <button class="go" id="again">Play again</button>
   <p id="next"></p>
 </div></div>
@@ -565,11 +566,11 @@ function hud(g) {
 }
 function showBoard(g) {
   const list = $("board");
-  if (!board) { list.innerHTML = "<li>Leaderboards need a connection.</li>"; return; }
+  if (!board) { list.innerHTML = "<li class='note'>Leaderboards need a connection.</li>"; return; }
   const submit = g.phase === "won" && me.nightKey === g.id + ":" + g.n ? board.submit(g.n).catch(() => null) : Promise.resolve();
   submit.then(() => board.top(10)).then(({ entries }) => {
-    list.innerHTML = entries.length ? entries.map((e) => `<li>${esc(e.username || "Player")}<span>${e.score} night${e.score === 1 ? "" : "s"}</span></li>`).join("") : "<li>Nobody has made it to 6 AM yet.</li>";
-  }).catch(() => { list.innerHTML = "<li>Couldn't load the leaderboard.</li>"; });
+    list.innerHTML = entries.length ? entries.map((e) => `<li>${esc(e.username || "Player")}<span>${e.score} night${e.score === 1 ? "" : "s"}</span></li>`).join("") : "<li class='note'>Nobody has made it to 6 AM yet.</li>";
+  }).catch(() => { list.innerHTML = "<li class='note'>Couldn't load the leaderboard.</li>"; });
 }
 /** Keep a color nobody else has: the later sessionId gives way. */
 function fixColor() {
@@ -600,7 +601,7 @@ const touchUI = matchMedia("(pointer: coarse)").matches && !ATTRACT;
 $("controls").hidden = ATTRACT; $("top").hidden = ATTRACT;
 function press(a, i, down) {
   if (!iRun(me.st)) return;
-  const g = night(); if (!g || g.phase !== "play" || g.out) { if (a !== "cam") return; }
+  const g = night(); if (down && (!g || g.phase !== "play" || g.out) && a !== "cam") return; // letting go always counts, so a held light or crank never sticks
   if (a === "door" && down) { me.d = me.d ? 0 : 1; }
   if (a === "light") me.l = down ? 1 : 0;
   if (a === "wind") me.w = down ? 1 : 0;
@@ -612,7 +613,8 @@ for (const ev of ["pointerup", "pointercancel", "lostpointercapture"]) $("action
 $("tabs").addEventListener("pointerdown", (e) => { const b = e.target.closest("button"); if (b) { e.preventDefault(); unlockAudio(); takeStation(+b.dataset.st); } });
 addEventListener("keydown", (e) => {
   unlockAudio();
-  if (e.key >= "1" && e.key <= "4" && !e.repeat) takeStation(+e.key - 1);
+  const digit = /^(Digit|Numpad)[1-4]$/.test(e.code) ? +e.code.slice(-1) : 0; // by code, so it works while Shift (the light) is held
+  if (digit && !e.repeat) takeStation(digit - 1);
   if (e.key === " " && !e.repeat) { e.preventDefault(); if (me.st === 0) press("cam", (me.c + 1) % ROOMS.length, true); else if (me.st === 3) press("wind", 0, true); else press("door", 0, true); }
   if (e.key === "ArrowRight" && me.st === 0) press("cam", (me.c + 1) % ROOMS.length, true);
   if (e.key === "ArrowLeft" && me.st === 0) press("cam", (me.c + ROOMS.length - 1) % ROOMS.length, true);
