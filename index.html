@@ -608,9 +608,10 @@ function press(a, i, down) {
   if (a === "cam" && down) { me.c = i; sound("blip"); }
   sendMine(true); drawButtons();
 }
-$("actions").addEventListener("pointerdown", (e) => { const b = e.target.closest("button"); if (!b) return; e.preventDefault(); unlockAudio(); b.setPointerCapture?.(e.pointerId); press(b.dataset.a, +b.dataset.i, true); });
+$("actions").addEventListener("pointerdown", (e) => { const b = e.target.closest("button"); if (!b || e.button !== 0) return; e.preventDefault(); unlockAudio(); b.setPointerCapture?.(e.pointerId); press(b.dataset.a, +b.dataset.i, true); });
 for (const ev of ["pointerup", "pointercancel", "lostpointercapture"]) $("actions").addEventListener(ev, (e) => { const b = e.target.closest("button"); if (b && (b.dataset.a === "light" || b.dataset.a === "wind")) press(b.dataset.a, 0, false); });
-$("tabs").addEventListener("pointerdown", (e) => { const b = e.target.closest("button"); if (b) { e.preventDefault(); unlockAudio(); takeStation(+b.dataset.st); } });
+$("controls").addEventListener("contextmenu", (e) => e.preventDefault()); // right-click on a control never opens the browser menu
+$("tabs").addEventListener("pointerdown", (e) => { const b = e.target.closest("button"); if (b && e.button === 0) { e.preventDefault(); unlockAudio(); takeStation(+b.dataset.st); } });
 addEventListener("keydown", (e) => {
   unlockAudio();
   const digit = /^(Digit|Numpad)[1-4]$/.test(e.code) ? +e.code.slice(-1) : 0; // by code, so it works while Shift (the light) is held
