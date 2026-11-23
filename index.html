@@ -81,7 +81,8 @@
  *               in}: ONE JSON field, written on every change; v only goes up
  *       `bots`  which stations the bots run, with their names
  *     The host's browser runs the toys, the power and the clock. A new host adopts it all.
- *   - No intents are needed: every control is a field on your own entity.
+ *   - Every control is a field on your own entity. The only intent is "again" { id } (Play again
+ *     on the results card).
  *   - A new night starts when the host bumps night.id; every client then resets.
  *   - ?attract plays offline with bots only, showing all four stations at once.
  *   - Leaderboard "nights-survived": the highest night you made it through.
@@ -284,9 +285,9 @@ function toysTick(G, t) {
 function botsTick(own, G, t) {
   const play = G.phase === "play" && !G.out;
   own.forEach((o, st) => {
-    if (o.human) return;
+    if (o.human) { const b = host.bots[st]; if (b && (st === 1 || st === 2)) b.d = G.doors[st - 1]; return; } // if the player leaves, the bot carries on with the door as it was
     const b = host.bots[st] || (host.bots[st] = makeBot(st, null, G));
-    if (!play) { b.l = 0; b.w = 0; return; }
+    if (!play) { b.l = 0; b.w = 0; if (G.phase === "brief") b.d = 0; return; } // a new night: every door opens
     if (st === 0) { // cameras: flip around, linger on the Ballerina sometimes
       if (t > b.think) { b.think = t + rnd(1800, 3200); const ball = G.toys[2][0]; b.c = ball < ROOMS.length && Math.random() < 0.5 ? ball : Math.floor(Math.random() * ROOMS.length); }
     } else if (st === 3) { // music box: wind when it gets low
@@ -580,7 +581,7 @@ function fixColor() {
   myColor = COLORS.find((c) => !used.has(c)) || myColor;
   net.me.set("c", myColor);
 }
-$("again").onclick = () => { if (isHost()) host.again = true; else net.send("again", {}); };
+$("again").onclick = () => { const g = night(); if (isHost()) host.again = true; else if (g) net.send("again", { id: g.id }); };
 
 /** One-off effects worked out from what changed in state (so nobody misses one). */
 let prevG = null;
@@ -673,7 +674,7 @@ function frame(now) {
 (async function start() {
   net = await connect();
   net.onState((st) => { S = st; });
-  net.on("again", () => { const g = night(); if (isHost() && g && g.phase === "lost") host.again = true; });
+  net.on("again", (d) => { const g = night(); if (isHost() && g && g.phase === "lost" && d && d.id === g.id) host.again = true; }); // only for the run that just ended
   net.onDisconnect(() => { dropped = true; $("net").textContent = "Reconnecting…"; });
   net.onReconnect(() => { dropped = false; });
   if (!net.offline && typeof MP !== "undefined") board = MP.auth({ key: MP_CONNECT.key, apiUrl: MP_CONNECT.apiUrl }).leaderboard(CONFIG.board);
